@@ -1,0 +1,55 @@
+name: Sideload package
+
+# A signed MSIX for installing through the Xbox Device Portal in Dev Mode. The certificate is
+# made per run (its subject must match the manifest's publisher) and shipped with the package.
+on:
+  push:
+    branches: [sideload]
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # Git Versioning requires a non-shallow clone
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '11.x'
+
+      - uses: microsoft/setup-msbuild@v3
+
+      - name: Create signing certificate
+        shell: pwsh
+        run: |
+          $publisher = ([xml](Get-Content src/JellyBox/Package.appxmanifest)).Package.Identity.Publisher
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $publisher `
+            -KeyUsage DigitalSignature -FriendlyName "JellyBox sideload" `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          $password = ConvertTo-SecureString -String "ci" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath sideload.pfx -Password $password | Out-Null
+          New-Item -ItemType Directory -Force AppPackages | Out-Null
+          Export-Certificate -Cert $cert -FilePath AppPackages\JellyBox-sideload.cer | Out-Null
+
+      - name: Build sideload package
+        shell: pwsh
+        run: |
+          msbuild src/JellyBox/JellyBox.csproj /restore /p:Configuration=Release /p:Platform=x64 `
+            /p:GenerateAppxPackageOnBuild=true /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxBundle=Never `
+            /p:AppxPackageSigningEnabled=true /p:PackageCertificateKeyFile="$PWD\sideload.pfx" `
+            /p:PackageCertificatePassword=ci /p:AppxPackageDir="$PWD\AppPackages\\" -bl:logs/msbuild.binlog
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: JellyBox-sideload
+          path: AppPackages
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: logs
+          path: logs
