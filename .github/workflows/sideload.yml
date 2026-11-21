@@ -29,8 +29,8 @@ jobs:
             -KeyUsage DigitalSignature -FriendlyName "JellyBox sideload" `
             -CertStoreLocation Cert:\CurrentUser\My `
             -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
-          $password = ConvertTo-SecureString -String "ci" -Force -AsPlainText
-          Export-PfxCertificate -Cert $cert -FilePath sideload.pfx -Password $password | Out-Null
+          # The MSIX tooling cannot read a password-protected .pfx; it signs from the store by thumbprint
+          "CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
           New-Item -ItemType Directory -Force AppPackages | Out-Null
           Export-Certificate -Cert $cert -FilePath AppPackages\JellyBox-sideload.cer | Out-Null
 
@@ -39,8 +39,8 @@ jobs:
         run: |
           msbuild src/JellyBox/JellyBox.csproj /restore /p:Configuration=Release /p:Platform=x64 `
             /p:GenerateAppxPackageOnBuild=true /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxBundle=Never `
-            /p:AppxPackageSigningEnabled=true /p:PackageCertificateKeyFile="$PWD\sideload.pfx" `
-            /p:PackageCertificatePassword=ci /p:AppxPackageDir="$PWD\AppPackages\\" -bl:logs/msbuild.binlog
+            /p:AppxPackageSigningEnabled=true /p:PackageCertificateThumbprint=$env:CERT_THUMBPRINT `
+            /p:AppxPackageDir="$PWD\AppPackages\\" -bl:logs/msbuild.binlog
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/upload-artifact@v7
